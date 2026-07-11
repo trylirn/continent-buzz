@@ -9,38 +9,110 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as NigeriaRouteImport } from './routes/nigeria'
+import { Route as AmericaRouteImport } from './routes/america'
+import { Route as AfricaRouteImport } from './routes/africa'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ApiPublicRefreshFeedsRouteImport } from './routes/api/public/refresh-feeds'
 
+const NigeriaRoute = NigeriaRouteImport.update({
+  id: '/nigeria',
+  path: '/nigeria',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AmericaRoute = AmericaRouteImport.update({
+  id: '/america',
+  path: '/america',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AfricaRoute = AfricaRouteImport.update({
+  id: '/africa',
+  path: '/africa',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiPublicRefreshFeedsRoute = ApiPublicRefreshFeedsRouteImport.update({
+  id: '/api/public/refresh-feeds',
+  path: '/api/public/refresh-feeds',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/africa': typeof AfricaRoute
+  '/america': typeof AmericaRoute
+  '/nigeria': typeof NigeriaRoute
+  '/api/public/refresh-feeds': typeof ApiPublicRefreshFeedsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/africa': typeof AfricaRoute
+  '/america': typeof AmericaRoute
+  '/nigeria': typeof NigeriaRoute
+  '/api/public/refresh-feeds': typeof ApiPublicRefreshFeedsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/africa': typeof AfricaRoute
+  '/america': typeof AmericaRoute
+  '/nigeria': typeof NigeriaRoute
+  '/api/public/refresh-feeds': typeof ApiPublicRefreshFeedsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths:
+    | '/'
+    | '/africa'
+    | '/america'
+    | '/nigeria'
+    | '/api/public/refresh-feeds'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/'
+  to: '/' | '/africa' | '/america' | '/nigeria' | '/api/public/refresh-feeds'
+  id:
+    | '__root__'
+    | '/'
+    | '/africa'
+    | '/america'
+    | '/nigeria'
+    | '/api/public/refresh-feeds'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AfricaRoute: typeof AfricaRoute
+  AmericaRoute: typeof AmericaRoute
+  NigeriaRoute: typeof NigeriaRoute
+  ApiPublicRefreshFeedsRoute: typeof ApiPublicRefreshFeedsRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/nigeria': {
+      id: '/nigeria'
+      path: '/nigeria'
+      fullPath: '/nigeria'
+      preLoaderRoute: typeof NigeriaRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/america': {
+      id: '/america'
+      path: '/america'
+      fullPath: '/america'
+      preLoaderRoute: typeof AmericaRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/africa': {
+      id: '/africa'
+      path: '/africa'
+      fullPath: '/africa'
+      preLoaderRoute: typeof AfricaRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -48,11 +120,22 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/refresh-feeds': {
+      id: '/api/public/refresh-feeds'
+      path: '/api/public/refresh-feeds'
+      fullPath: '/api/public/refresh-feeds'
+      preLoaderRoute: typeof ApiPublicRefreshFeedsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AfricaRoute: AfricaRoute,
+  AmericaRoute: AmericaRoute,
+  NigeriaRoute: NigeriaRoute,
+  ApiPublicRefreshFeedsRoute: ApiPublicRefreshFeedsRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
