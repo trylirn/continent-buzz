@@ -14,7 +14,75 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      currency_rates: {
+        Row: {
+          cad: number | null
+          eur: number | null
+          gbp: number | null
+          id: number
+          updated_at: string
+          usd: number | null
+        }
+        Insert: {
+          cad?: number | null
+          eur?: number | null
+          gbp?: number | null
+          id?: number
+          updated_at?: string
+          usd?: number | null
+        }
+        Update: {
+          cad?: number | null
+          eur?: number | null
+          gbp?: number | null
+          id?: number
+          updated_at?: string
+          usd?: number | null
+        }
+        Relationships: []
+      }
+      news_items: {
+        Row: {
+          category: string
+          created_at: string
+          id: string
+          image_url: string | null
+          published_at: string
+          region: string
+          source: string
+          title: string
+          tweet_text: string
+          url: string
+          viral_score: number
+        }
+        Insert: {
+          category: string
+          created_at?: string
+          id?: string
+          image_url?: string | null
+          published_at?: string
+          region: string
+          source: string
+          title: string
+          tweet_text: string
+          url: string
+          viral_score?: number
+        }
+        Update: {
+          category?: string
+          created_at?: string
+          id?: string
+          image_url?: string | null
+          published_at?: string
+          region?: string
+          source?: string
+          title?: string
+          tweet_text?: string
+          url?: string
+          viral_score?: number
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
