@@ -194,7 +194,8 @@ ${JSON.stringify(items, null, 2)}`;
 
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(`AI gateway ${res.status}: ${body}`);
+    console.warn(`AI gateway ${res.status} (${body.slice(0, 120)}) — falling back to original content`);
+    return fallbackCurate(items);
   }
   const data = (await res.json()) as { choices: { message: { content: string } }[] };
   const raw = data.choices[0]?.message?.content ?? "[]";
