@@ -13,10 +13,10 @@ export const Route = createFileRoute("/")({
         content:
           "AI-curated viral news from Nigeria, Africa and America. Every story comes tweet-ready — copy, paste, thread the source.",
       },
-      { property: "og:title", content: "The Wire — Africa, Nigeria & US News" },
+      { property: "og:title", content: "The Wire — Africa, Nigeria & US News, Ready for X" },
       {
         property: "og:description",
-        content: "AI-curated viral news, ready to post as a Twitter thread.",
+        content: "AI-curated viral news from Nigeria, Africa and America. Every story comes tweet-ready — copy, paste, thread the source.",
       },
     ],
   }),
