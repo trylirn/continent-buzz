@@ -215,13 +215,17 @@ ${JSON.stringify(items, null, 2)}`;
     const key = Object.keys(obj).find((k) => Array.isArray(obj[k]));
     if (key) arr = obj[key] as unknown[];
   }
-  return arr.map((x): AIResult => {
-    const o = (x ?? {}) as Record<string, unknown>;
+  if (arr.length === 0) return fallbackCurate(items);
+  const fb = fallbackCurate(items);
+  return items.map((_, i): AIResult => {
+    const o = (arr[i] ?? {}) as Record<string, unknown>;
+    const tweet = String(o.tweet_text ?? "").slice(0, 275);
+    if (!tweet) return fb[i];
     return {
-      region: (o.region as AIResult["region"]) ?? "reject",
+      region: (o.region as AIResult["region"]) ?? fb[i].region,
       category: (o.category as string) ?? "Breaking",
-      viral_score: Number(o.viral_score) || 0,
-      tweet_text: String(o.tweet_text ?? "").slice(0, 275),
+      viral_score: Number(o.viral_score) || fb[i].viral_score,
+      tweet_text: tweet,
     };
   });
 }
