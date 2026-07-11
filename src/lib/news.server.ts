@@ -141,11 +141,27 @@ export type AIResult = {
 
 const CATEGORIES = ["Breaking","Politics","Security","Economy","Sports","Education","Celebrity","Viral","Disaster","Corruption","Quote","Tech"];
 
+function fallbackCurate(
+  items: { source: string; title: string; description: string; hint_region: string }[],
+): AIResult[] {
+  return items.map((it) => {
+    const region = (["nigeria", "africa", "america"].includes(it.hint_region)
+      ? it.hint_region
+      : "africa") as AIResult["region"];
+    // Keep original content — no AI rewrite available.
+    const text = it.title.length > 260 ? it.title.slice(0, 257) + "…" : it.title;
+    return { region, category: "Breaking", viral_score: 60, tweet_text: text };
+  });
+}
+
 export async function aiCurateBatch(
   items: { source: string; title: string; description: string; hint_region: string }[],
 ): Promise<AIResult[]> {
   const key = process.env.LOVABLE_API_KEY;
-  if (!key) throw new Error("Missing LOVABLE_API_KEY");
+  if (!key) {
+    console.warn("Missing LOVABLE_API_KEY — using original content fallback");
+    return fallbackCurate(items);
+  }
 
   const prompt = `You curate viral news for a Twitter (X) account targeting Nigerian and African audiences (plus a separate America feed).
 
