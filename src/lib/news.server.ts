@@ -141,11 +141,27 @@ export type AIResult = {
 
 const CATEGORIES = ["Breaking","Politics","Security","Economy","Sports","Education","Celebrity","Viral","Disaster","Corruption","Quote","Tech"];
 
+function fallbackCurate(
+  items: { source: string; title: string; description: string; hint_region: string }[],
+): AIResult[] {
+  return items.map((it) => {
+    const region = (["nigeria", "africa", "america"].includes(it.hint_region)
+      ? it.hint_region
+      : "africa") as AIResult["region"];
+    // Keep original content — no AI rewrite available.
+    const text = it.title.length > 260 ? it.title.slice(0, 257) + "…" : it.title;
+    return { region, category: "Breaking", viral_score: 60, tweet_text: text };
+  });
+}
+
 export async function aiCurateBatch(
   items: { source: string; title: string; description: string; hint_region: string }[],
 ): Promise<AIResult[]> {
   const key = process.env.LOVABLE_API_KEY;
-  if (!key) throw new Error("Missing LOVABLE_API_KEY");
+  if (!key) {
+    console.warn("Missing LOVABLE_API_KEY — using original content fallback");
+    return fallbackCurate(items);
+  }
 
   const prompt = `You curate viral news for a Twitter (X) account targeting Nigerian and African audiences (plus a separate America feed).
 
@@ -178,7 +194,8 @@ ${JSON.stringify(items, null, 2)}`;
 
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(`AI gateway ${res.status}: ${body}`);
+    console.warn(`AI gateway ${res.status} (${body.slice(0, 120)}) — falling back to original content`);
+    return fallbackCurate(items);
   }
   const data = (await res.json()) as { choices: { message: { content: string } }[] };
   const raw = data.choices[0]?.message?.content ?? "[]";
@@ -198,13 +215,17 @@ ${JSON.stringify(items, null, 2)}`;
     const key = Object.keys(obj).find((k) => Array.isArray(obj[k]));
     if (key) arr = obj[key] as unknown[];
   }
-  return arr.map((x): AIResult => {
-    const o = (x ?? {}) as Record<string, unknown>;
+  if (arr.length === 0) return fallbackCurate(items);
+  const fb = fallbackCurate(items);
+  return items.map((_, i): AIResult => {
+    const o = (arr[i] ?? {}) as Record<string, unknown>;
+    const tweet = String(o.tweet_text ?? "").slice(0, 275);
+    if (!tweet) return fb[i];
     return {
-      region: (o.region as AIResult["region"]) ?? "reject",
+      region: (o.region as AIResult["region"]) ?? fb[i].region,
       category: (o.category as string) ?? "Breaking",
-      viral_score: Number(o.viral_score) || 0,
-      tweet_text: String(o.tweet_text ?? "").slice(0, 275),
+      viral_score: Number(o.viral_score) || fb[i].viral_score,
+      tweet_text: tweet,
     };
   });
 }
