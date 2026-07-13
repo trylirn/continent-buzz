@@ -1,97 +1,81 @@
 
-## Free X auto-posting via webhook (Make.com or n8n)
+## Two things to do
 
-Both Make.com and self-hosted n8n work the same way from our side: the app POSTs a JSON payload to a webhook URL you provide, and your scenario/workflow handles the actual X post (upload media + create tweet). No X API costs on our side, no OAuth code to maintain.
+### Part A — Code change (I'll do this)
 
-### 1. Schema
+Limit auto-posting to Nigeria only for now. When you're ready to add Africa/America, we just flip a setting.
 
-Add to `news_items`:
-- `posted_at timestamptz null` — set when the webhook accepts the post
-- `post_error text null` — last error, for retries/visibility
+**Edit `src/routes/api/public/auto-post.ts`:**
+- Change the regions list from `["nigeria", "africa", "america"]` to `["nigeria"]`.
+- Everything else stays the same — Africa and America stories still show on the site, they just don't get tweeted.
 
-Add a settings table so you can paste the webhook URL from the UI (no code redeploy needed):
+**Edit `src/components/NewsCard.tsx`:**
+- Hide the "Post to X now" button on Africa and America cards (only show it on Nigeria cards). This prevents you from accidentally sending non-Nigeria stories to your Nigeria X account.
 
-```sql
-create table public.app_settings (
-  id int primary key default 1,
-  x_webhook_url text,
-  auto_post_enabled boolean not null default false,
-  min_viral_score int not null default 75,
-  updated_at timestamptz not null default now()
-);
--- GRANTs + RLS: anon read of a redacted view or authenticated-only; write via server fn only
-```
+That's the only code change. One line of logic. No new secrets, no new tables.
 
-### 2. Webhook payload we send
+---
 
-Per story, one POST:
+### Part B — Finish your Make.com scenario (you do this, I'll walk you through it)
 
-```json
-{
-  "id": "uuid",
-  "tweet_text": "BREAKING: ...\n\n...",
-  "image_url": "https://source.com/photo.jpg",
-  "source_url": "https://source.com/article",
-  "source": "Punch",
-  "region": "nigeria",
-  "category": "Politics",
-  "viral_score": 84
-}
-```
+Right now you have **one** module: the Webhook. You need **two more** modules after it. Here's exactly what to click.
 
-Your Make/n8n scenario:
-- Make.com: Webhook trigger → HTTP module to download `image_url` → X "Upload media" → X "Create a post" with `tweet_text` + media ID. Free tier = 1,000 ops/month; each post ~3 ops → ~330 posts/month.
-- n8n: Webhook node → HTTP Request (download image) → X node (post with media). Unlimited on self-host.
+#### Step 1 — Save what you have and grab data
 
-### 3. New server route — `POST /api/public/auto-post`
+1. In the Webhook panel that's open in your screenshot, click **Save** (bottom right, purple button).
+2. The panel closes. You'll see a message: "Successfully determined" or "Waiting for data".
+3. Open a new browser tab, go to your news site: <https://continent-buzz.lovable.app/nigeria>
+4. Find any Nigeria story and click the blue **"Post to X now"** button on the card.
+5. Go back to Make.com. It should now say **"Successfully determined"** — this means Make received a sample from your site and now knows what fields to expect (tweet_text, image_url, etc.).
 
-Called by pg_cron every 15 min. Logic:
-1. Read `app_settings`. If `auto_post_enabled=false` or no `x_webhook_url`, exit.
-2. Query `news_items` where `posted_at is null` and `viral_score >= min_viral_score`, ordered by `viral_score desc, published_at desc`. Take top **1 per region** (nigeria/africa/america) per run → ~12 posts/hour max, ~288/day cap; in practice far fewer since only high-score items qualify.
-3. For each item: POST payload to `x_webhook_url`. On 2xx → set `posted_at=now()`. On error → store `post_error`, leave `posted_at` null (auto-retry next run).
-4. Return `{ posted: N, skipped: M, errors: [...] }`.
+*If nothing arrives:* wait 30 seconds, then click **"Redetermine data structure"** on the Webhook module and try the button again.
 
-Route lives at `src/routes/api/public/auto-post.ts`, uses `supabaseAdmin` inside the handler. Public prefix bypasses auth; the webhook URL itself is the shared secret.
+#### Step 2 — Add the HTTP module (downloads the image)
 
-### 4. Cron
+1. Hover over the right edge of the Webhooks circle. A **"+"** appears — click it.
+2. In the search box, type **HTTP** and pick the **HTTP** app.
+3. Choose the action **"Get a file"**.
+4. In the URL field, click it once. A small panel opens on the right showing the fields from your webhook. Click **`image_url`** — it should insert as a purple bubble in the URL field.
+5. Leave everything else default. Click **OK**.
 
-Extend the existing 15-min cron (or add a second job) to also hit `/api/public/auto-post` after `/api/public/refresh-feeds`, so fresh curated stories can post in the same cycle.
+#### Step 3 — Add the X (Twitter) module
 
-```sql
-select cron.schedule(
-  'auto-post-x', '*/15 * * * *',
-  $$ select net.http_post(
-       url:='https://project--92a0d9a7-d9cc-4e1e-ba81-56d0e5a53030.lovable.app/api/public/auto-post',
-       headers:='{"Content-Type":"application/json"}'::jsonb,
-       body:='{}'::jsonb
-     ); $$
-);
-```
+1. Hover over the right edge of the new HTTP circle. Click the **"+"**.
+2. Search **X** (or **Twitter**). Pick the app named **X** or **Twitter**.
+3. Choose the action **"Create a Post"**.
+4. **Connection** dropdown → click **"Add"** → **"Add a connection"**. A popup opens asking you to sign in to X.
+   - **This is where you choose which X account.** Log out of X in another tab first if you're logged into the wrong account, then log in with the account you want tweets posted from. Approve the Make.com app.
+   - The connection will be saved with a name like "My X connection" — you can rename it "Nigeria News" for clarity.
+5. Back in the module settings:
+   - **Text** field → click it, then click **`tweet_text`** from the field panel on the right.
+   - **Media** section → expand it → **Media** field → click it → click **"Data"** from the HTTP module's output (this is the downloaded image).
+   - Optionally set **File name** → click **`id`** + type `.jpg` after it (so filenames look like `abc123.jpg`).
+6. Click **OK**.
 
-### 5. Settings UI
+#### Step 4 — Turn the scenario on
 
-Small admin panel at `/settings` (or inline on `/`) with:
-- Webhook URL input (paste from Make.com or your n8n instance)
-- Toggle: Auto-post enabled
-- Min viral score slider (default 75)
-- "Send test post" button that fires a sample payload so you verify the scenario before turning auto-post on
-- Recent post log: last 20 items with status (posted / pending / error)
+1. Bottom left of the Make.com screen, there's a big **toggle switch** that says **"OFF"** in grey.
+2. Click it. It should turn green and say **"ON"**.
+3. That's it. Every 15 minutes our system will send Nigeria's top viral story, and Make.com will download the image and post it to X.
 
-Writes go through an authenticated server fn; reads via server fn too so the URL isn't exposed to anon.
+#### Step 5 — Test end-to-end right now
 
-### 6. Fallbacks & safety
+1. On the news site, click **"Post to X now"** on any Nigeria card.
+2. Wait 5–10 seconds.
+3. Check your X account — the tweet with image should appear.
+4. Back in Make.com, click **"History"** (clock icon, bottom toolbar) to see the run log. Green = success, red = error (hover to see why).
 
-- If webhook returns non-2xx, we don't mark posted → next run retries automatically.
-- Same-story dedupe: `posted_at is null` filter guarantees no double-post.
-- If AI fallback produced a weak tweet (score 60 default), it won't meet the 75 threshold — nothing posts until real AI curation runs.
-- Manual "Post now" button on each `NewsCard` fires the same webhook for that one item (opt-in for lower-score gems).
+---
 
-### Technical section
+### If something breaks
 
-- `Make.com` free plan: 1,000 ops/month, 15-min minimum polling but our webhook is push so that limit doesn't apply. `n8n` self-host = free/unlimited.
-- Both platforms provide the X OAuth handshake in their UI — you connect your X account once, we never touch tokens.
-- No new secrets needed in Lovable (webhook URL is stored in DB via UI). Optional `X_WEBHOOK_URL` env var supported as override if you'd rather not use the settings table.
+- **Tweet posts but no image** → in Step 2, make sure you picked **"Get a file"**, not "Make a request". And in Step 3, the Media field must map to HTTP's **"Data"** output, not "URL".
+- **"401 Unauthorized" from X** → your X connection expired or you approved the wrong account. In X module → Connection → click the pencil → Reconnect.
+- **"Text too long"** → shouldn't happen (we cap at 275 chars), but if it does tell me and I'll tighten the AI prompt further.
+- **Duplicate posts** → won't happen. Once a story is posted, our system marks it and never sends it again.
 
-### What I need from you to build
+---
 
-Just approve the plan. You'll paste the webhook URL later once you set up the Make/n8n scenario — no credentials needed upfront.
+### What I'll change in code once you approve
+
+Just the two small edits in Part A above. Two files. Then Nigeria-only auto-posting is locked in, and adding Africa/America later means adding two more Make.com scenarios (one per X account) and re-enabling those regions in one line of code.
