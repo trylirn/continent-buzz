@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { Copy, Check, Link2, Download, ExternalLink } from "lucide-react";
+import { Copy, Check, Link2, Download, ExternalLink, Send } from "lucide-react";
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
-import { proxyImage } from "@/lib/news.functions";
+import { proxyImage, postToX } from "@/lib/news.functions";
+
 import { REGIONS, type Region } from "@/lib/regions";
 
 export type NewsItem = {
