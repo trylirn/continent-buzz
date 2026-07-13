@@ -33,9 +33,12 @@ async function copy(text: string, label: string) {
 
 export function NewsCard({ item }: { item: NewsItem }) {
   const [downloading, setDownloading] = useState(false);
+  const [posting, setPosting] = useState(false);
+  const [posted, setPosted] = useState<boolean>(Boolean(item.posted_at));
   const region = REGIONS[item.region as Region];
   const sourceBlock = `Source: ${item.source}\n${item.url}`;
   const threadBlock = `${item.tweet_text}\n\n---\n${sourceBlock}`;
+
   const timeAgo = (() => {
     try {
       return formatDistanceToNow(new Date(item.published_at), { addSuffix: true });
