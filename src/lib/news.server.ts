@@ -58,8 +58,33 @@ function extractImage(item: Record<string, unknown>): string | null {
   return null;
 }
 
+function decodeEntities(s: string): string {
+  const named: Record<string, string> = {
+    amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ",
+    ldquo: "“", rdquo: "”", lsquo: "‘", rsquo: "’", hellip: "…",
+    mdash: "—", ndash: "–", copy: "©", reg: "®", trade: "™",
+  };
+  return s
+    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)))
+    .replace(/&([a-z]+);/gi, (m, name) => named[name.toLowerCase()] ?? m);
+}
+
 function stripHtml(s: string): string {
-  return s.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+  return decodeEntities(s.replace(/<[^>]+>/g, "")).replace(/\s+/g, " ").trim();
+}
+
+export function cleanTweet(s: string): string {
+  return decodeEntities(s)
+    // normalize smart quotes/dashes to plain ASCII where sensible
+    .replace(/[\u2018\u2019\u201A\u2032]/g, "'")
+    .replace(/[\u201C\u201D\u201E\u2033]/g, '"')
+    .replace(/[\u2013\u2014]/g, "-")
+    .replace(/\u2026/g, "...")
+    // remove stray control chars
+    .replace(/[\u0000-\u001F\u007F]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 async function fetchFeed(feed: (typeof FEEDS)[number]): Promise<FeedItem[]> {
