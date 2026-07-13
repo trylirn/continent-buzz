@@ -44,7 +44,7 @@ export const Route = createFileRoute("/api/public/auto-post")({
         const minScore = Number(process.env.X_MIN_VIRAL_SCORE ?? 75);
         const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
-        const regions = ["nigeria", "africa", "america"] as const;
+        const regions = ["nigeria"] as const;
         let posted = 0;
         const errors: { id: string; error: string }[] = [];
 
