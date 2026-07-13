@@ -174,7 +174,8 @@ function fallbackCurate(
       ? it.hint_region
       : "africa") as AIResult["region"];
     // Keep original content — no AI rewrite available.
-    const text = it.title.length > 260 ? it.title.slice(0, 257) + "…" : it.title;
+    const cleaned = cleanTweet(it.title);
+    const text = cleaned.length > 260 ? cleaned.slice(0, 257) + "..." : cleaned;
     return { region, category: "Breaking", viral_score: 60, tweet_text: text };
   });
 }
