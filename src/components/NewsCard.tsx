@@ -17,7 +17,10 @@ export type NewsItem = {
   category: string;
   viral_score: number;
   published_at: string;
+  posted_at?: string | null;
+  post_error?: string | null;
 };
+
 
 async function copy(text: string, label: string) {
   try {
