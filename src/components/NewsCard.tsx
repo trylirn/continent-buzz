@@ -70,7 +70,25 @@ export function NewsCard({ item }: { item: NewsItem }) {
     }
   }
 
+  async function handlePostToX() {
+    setPosting(true);
+    try {
+      const r = await postToX({ data: { id: item.id } });
+      if (r.ok) {
+        setPosted(true);
+        toast.success("Sent to X webhook");
+      } else {
+        toast.error(r.error ?? "Post failed");
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Post failed");
+    } finally {
+      setPosting(false);
+    }
+  }
+
   const isBreaking = /^(BREAKING|JUST IN)/i.test(item.tweet_text);
+
 
   return (
     <article className="group overflow-hidden rounded-lg border border-border bg-card shadow-sm transition-shadow hover:shadow-md">
