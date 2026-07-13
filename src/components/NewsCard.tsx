@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { Copy, Check, Link2, Download, ExternalLink } from "lucide-react";
+import { Copy, Check, Link2, Download, ExternalLink, Send } from "lucide-react";
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
-import { proxyImage } from "@/lib/news.functions";
+import { proxyImage, postToX } from "@/lib/news.functions";
+
 import { REGIONS, type Region } from "@/lib/regions";
 
 export type NewsItem = {
@@ -16,7 +17,10 @@ export type NewsItem = {
   category: string;
   viral_score: number;
   published_at: string;
+  posted_at?: string | null;
+  post_error?: string | null;
 };
+
 
 async function copy(text: string, label: string) {
   try {
@@ -29,9 +33,12 @@ async function copy(text: string, label: string) {
 
 export function NewsCard({ item }: { item: NewsItem }) {
   const [downloading, setDownloading] = useState(false);
+  const [posting, setPosting] = useState(false);
+  const [posted, setPosted] = useState<boolean>(Boolean(item.posted_at));
   const region = REGIONS[item.region as Region];
   const sourceBlock = `Source: ${item.source}\n${item.url}`;
   const threadBlock = `${item.tweet_text}\n\n---\n${sourceBlock}`;
+
   const timeAgo = (() => {
     try {
       return formatDistanceToNow(new Date(item.published_at), { addSuffix: true });
@@ -63,7 +70,25 @@ export function NewsCard({ item }: { item: NewsItem }) {
     }
   }
 
+  async function handlePostToX() {
+    setPosting(true);
+    try {
+      const r = await postToX({ data: { id: item.id } });
+      if (r.ok) {
+        setPosted(true);
+        toast.success("Sent to X webhook");
+      } else {
+        toast.error(r.error ?? "Post failed");
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Post failed");
+    } finally {
+      setPosting(false);
+    }
+  }
+
   const isBreaking = /^(BREAKING|JUST IN)/i.test(item.tweet_text);
+
 
   return (
     <article className="group overflow-hidden rounded-lg border border-border bg-card shadow-sm transition-shadow hover:shadow-md">
@@ -143,6 +168,19 @@ export function NewsCard({ item }: { item: NewsItem }) {
             </a>
           )}
         </div>
+
+        <button
+          onClick={handlePostToX}
+          disabled={posting || posted}
+          className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-md bg-sky-500 px-3 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          <Send className="h-3.5 w-3.5" />
+          {posted ? "Posted to X" : posting ? "Sending…" : "Post to X now"}
+        </button>
+        {item.post_error && !posted && (
+          <p className="mt-1 text-xs text-red-600">Last error: {item.post_error}</p>
+        )}
+
       </div>
     </article>
   );

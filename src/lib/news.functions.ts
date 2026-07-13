@@ -120,3 +120,50 @@ export const proxyImage = createServerFn({ method: "GET" })
       return { dataUrl: null, contentType: null };
     }
   });
+
+export const postToX = createServerFn({ method: "POST" })
+  .inputValidator((input: { id: string }) => ({ id: input.id }))
+  .handler(async ({ data }) => {
+    const webhookUrl = process.env.X_WEBHOOK_URL;
+    if (!webhookUrl) return { ok: false, error: "X webhook not configured" };
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: item } = await supabaseAdmin
+      .from("news_items")
+      .select("id,url,source,tweet_text,image_url,region,category,viral_score")
+      .eq("id", data.id)
+      .maybeSingle();
+    if (!item) return { ok: false, error: "Story not found" };
+    try {
+      const res = await fetch(webhookUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: item.id,
+          tweet_text: item.tweet_text,
+          image_url: item.image_url,
+          source_url: item.url,
+          source: item.source,
+          region: item.region,
+          category: item.category,
+          viral_score: item.viral_score,
+        }),
+        signal: AbortSignal.timeout(20000),
+      });
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        const msg = `Webhook ${res.status}: ${body.slice(0, 200)}`;
+        await supabaseAdmin.from("news_items").update({ post_error: msg }).eq("id", item.id);
+        return { ok: false, error: msg };
+      }
+      await supabaseAdmin
+        .from("news_items")
+        .update({ posted_at: new Date().toISOString(), post_error: null })
+        .eq("id", item.id);
+      return { ok: true };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      await supabaseAdmin.from("news_items").update({ post_error: msg }).eq("id", item.id);
+      return { ok: false, error: msg };
+    }
+  });
+
