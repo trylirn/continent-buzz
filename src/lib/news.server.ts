@@ -58,8 +58,33 @@ function extractImage(item: Record<string, unknown>): string | null {
   return null;
 }
 
+function decodeEntities(s: string): string {
+  const named: Record<string, string> = {
+    amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ",
+    ldquo: "“", rdquo: "”", lsquo: "‘", rsquo: "’", hellip: "…",
+    mdash: "—", ndash: "–", copy: "©", reg: "®", trade: "™",
+  };
+  return s
+    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)))
+    .replace(/&([a-z]+);/gi, (m, name) => named[name.toLowerCase()] ?? m);
+}
+
 function stripHtml(s: string): string {
-  return s.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+  return decodeEntities(s.replace(/<[^>]+>/g, "")).replace(/\s+/g, " ").trim();
+}
+
+export function cleanTweet(s: string): string {
+  return decodeEntities(s)
+    // normalize smart quotes/dashes to plain ASCII where sensible
+    .replace(/[\u2018\u2019\u201A\u2032]/g, "'")
+    .replace(/[\u201C\u201D\u201E\u2033]/g, '"')
+    .replace(/[\u2013\u2014]/g, "-")
+    .replace(/\u2026/g, "...")
+    // remove stray control chars
+    .replace(/[\u0000-\u001F\u007F]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 async function fetchFeed(feed: (typeof FEEDS)[number]): Promise<FeedItem[]> {
@@ -149,7 +174,8 @@ function fallbackCurate(
       ? it.hint_region
       : "africa") as AIResult["region"];
     // Keep original content — no AI rewrite available.
-    const text = it.title.length > 260 ? it.title.slice(0, 257) + "…" : it.title;
+    const cleaned = cleanTweet(it.title);
+    const text = cleaned.length > 260 ? cleaned.slice(0, 257) + "..." : cleaned;
     return { region, category: "Breaking", viral_score: 60, tweet_text: text };
   });
 }
@@ -169,7 +195,7 @@ For each item, decide:
 - region: "nigeria" if primarily Nigerian, "africa" if primarily African (excluding Nigeria-only), "america" if primarily US news, "reject" if irrelevant to those audiences (e.g. Mbappé/France records, non-African/non-US celebrity gossip, generic Europe/Asia news with no Africa angle).
 - category: one of ${CATEGORIES.join(", ")}.
 - viral_score: 0-100. HIGH scores for: corruption, disaster, breaking politics/security, bandit attacks, celebrity scandal, xenophobia (esp. SA), currency shocks, governor drama, government spending, human-interest videos, AFCON/football wins involving Africans, education bans, quotes from politicians/pastors. LOW scores for: dry policy analysis, foreign news with no Africa angle, minor local stories.
-- tweet_text: rewrite as a punchy, human, neutral-factual tweet ready to paste on X. Use "BREAKING:" or "JUST IN:" prefix ONLY for genuinely breaking/urgent items. Use "~ [Person] says" for quotes. 1-2 sentences, under 260 chars. No hashtags, no emojis (unless truly warranted), no "click here". Sound like a real news wire, not clickbait.
+- tweet_text: rewrite as a natural, human, conversational tweet — like a real person sharing news with friends, not a stiff news wire. Aim for 180-270 characters (must stay under 275). Add light context, texture, or a small human observation where it fits (e.g. what happened, who is affected, why it matters), but stay factual and neutral. Use "BREAKING:" or "JUST IN:" ONLY for genuinely breaking/urgent items. Use "~ [Person] says" style for quotes. 2-3 sentences allowed. No hashtags, no emojis, no "click here", no clickbait. Use plain ASCII punctuation only: straight quotes ('), hyphens (-), three dots (...) — never smart quotes, curly apostrophes, em-dashes, or HTML entities like &#8217;. Avoid ALL CAPS shouting except for the BREAKING/JUST IN prefix.
 
 Return a JSON array with one object per input item, in the same order. Only these fields: region, category, viral_score, tweet_text.
 
@@ -219,7 +245,7 @@ ${JSON.stringify(items, null, 2)}`;
   const fb = fallbackCurate(items);
   return items.map((_, i): AIResult => {
     const o = (arr[i] ?? {}) as Record<string, unknown>;
-    const tweet = String(o.tweet_text ?? "").slice(0, 275);
+    const tweet = cleanTweet(String(o.tweet_text ?? "")).slice(0, 275);
     if (!tweet) return fb[i];
     return {
       region: (o.region as AIResult["region"]) ?? fb[i].region,

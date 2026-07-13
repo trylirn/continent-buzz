@@ -26,7 +26,37 @@ export function NewsFeed({ region, title, subtitle }: Props) {
     onError: (e) => toast.error(String(e)),
   });
 
-  const items = (data?.items ?? []) as NewsItem[];
+  const rawItems = (data?.items ?? []) as NewsItem[];
+  // Newest first, then round-robin interleave by source so no single outlet
+  // dominates the top of the page.
+  const items = (() => {
+    const sorted = [...rawItems].sort(
+      (a, b) => new Date(b.published_at).getTime() - new Date(a.published_at).getTime(),
+    );
+    const buckets = new Map<string, NewsItem[]>();
+    for (const it of sorted) {
+      const key = it.source || "unknown";
+      const arr = buckets.get(key) ?? [];
+      arr.push(it);
+      buckets.set(key, arr);
+    }
+    const queues = Array.from(buckets.values());
+    const out: NewsItem[] = [];
+    while (queues.some((q) => q.length > 0)) {
+      // Sort queues so the one whose next item is newest goes first — keeps
+      // truly-breaking stories near the top even after interleaving.
+      queues.sort((a, b) => {
+        if (!a.length) return 1;
+        if (!b.length) return -1;
+        return new Date(b[0].published_at).getTime() - new Date(a[0].published_at).getTime();
+      });
+      for (const q of queues) {
+        const next = q.shift();
+        if (next) out.push(next);
+      }
+    }
+    return out;
+  })();
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-6">
