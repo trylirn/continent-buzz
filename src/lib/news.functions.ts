@@ -133,34 +133,49 @@ export async function postToBuffer(item: {
   if (!token) return { ok: false, error: "BUFFER_ACCESS_TOKEN not configured" };
   if (!channelId) return { ok: false, error: `No Buffer channel for region ${item.region}` };
 
-  const form = new URLSearchParams();
-  form.append("profile_ids[]", channelId);
-  form.append("text", item.tweet_text);
-  form.append("now", "true");
+  const query = `
+    mutation CreatePost($input: CreatePostInput!) {
+      createPost(input: $input) {
+        ... on PostActionSuccess { post { id } }
+        ... on MutationError { message }
+      }
+    }
+  `;
+  const input: Record<string, unknown> = {
+    text: item.tweet_text,
+    channelId,
+    schedulingType: "automatic",
+    mode: "shareNow",
+  };
   if (item.image_url) {
-    form.append("media[photo]", item.image_url);
-    form.append("media[picture]", item.image_url);
-    form.append("media[thumbnail]", item.image_url);
+    input.assets = [{ image: { url: item.image_url } }];
   }
 
-  const res = await fetch("https://api.bufferapp.com/1/updates/create.json", {
+  const res = await fetch("https://api.buffer.com", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
-      "Content-Type": "application/x-www-form-urlencoded",
+      "Content-Type": "application/json",
     },
-    body: form.toString(),
+    body: JSON.stringify({ query, variables: { input } }),
     signal: AbortSignal.timeout(20000),
   });
   const body = await res.text().catch(() => "");
   if (!res.ok) return { ok: false, error: `Buffer ${res.status}: ${body.slice(0, 250)}` };
+
   try {
-    const json = JSON.parse(body) as { success?: boolean; message?: string };
-    if (json.success === false) {
-      return { ok: false, error: `Buffer: ${json.message ?? body.slice(0, 250)}` };
+    const json = JSON.parse(body) as {
+      errors?: { message?: string }[];
+      data?: { createPost?: { post?: { id?: string }; message?: string } };
+    };
+    if (json.errors && json.errors.length > 0) {
+      return { ok: false, error: `Buffer: ${json.errors.map((e) => e.message).join("; ").slice(0, 250)}` };
     }
+    const result = json.data?.createPost;
+    if (result?.message) return { ok: false, error: `Buffer: ${result.message}` };
+    if (!result?.post?.id) return { ok: false, error: `Buffer: unexpected response ${body.slice(0, 200)}` };
   } catch {
-    // non-JSON success is fine
+    return { ok: false, error: `Buffer: invalid JSON ${body.slice(0, 200)}` };
   }
   return { ok: true };
 }
