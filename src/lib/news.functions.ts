@@ -121,49 +121,69 @@ export const proxyImage = createServerFn({ method: "GET" })
     }
   });
 
+export async function postToBuffer(item: {
+  id: string;
+  tweet_text: string;
+  image_url: string | null;
+  region: string;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const token = process.env.BUFFER_ACCESS_TOKEN;
+  const channelId =
+    item.region === "nigeria" ? process.env.BUFFER_CHANNEL_ID_NIGERIA : undefined;
+  if (!token) return { ok: false, error: "BUFFER_ACCESS_TOKEN not configured" };
+  if (!channelId) return { ok: false, error: `No Buffer channel for region ${item.region}` };
+
+  const form = new URLSearchParams();
+  form.append("profile_ids[]", channelId);
+  form.append("text", item.tweet_text);
+  form.append("now", "true");
+  if (item.image_url) {
+    form.append("media[photo]", item.image_url);
+    form.append("media[picture]", item.image_url);
+    form.append("media[thumbnail]", item.image_url);
+  }
+
+  const res = await fetch("https://api.bufferapp.com/1/updates/create.json", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: form.toString(),
+    signal: AbortSignal.timeout(20000),
+  });
+  const body = await res.text().catch(() => "");
+  if (!res.ok) return { ok: false, error: `Buffer ${res.status}: ${body.slice(0, 250)}` };
+  try {
+    const json = JSON.parse(body) as { success?: boolean; message?: string };
+    if (json.success === false) {
+      return { ok: false, error: `Buffer: ${json.message ?? body.slice(0, 250)}` };
+    }
+  } catch {
+    // non-JSON success is fine
+  }
+  return { ok: true };
+}
+
 export const postToX = createServerFn({ method: "POST" })
   .inputValidator((input: { id: string }) => ({ id: input.id }))
   .handler(async ({ data }) => {
-    const webhookUrl = process.env.X_WEBHOOK_URL;
-    if (!webhookUrl) return { ok: false, error: "X webhook not configured" };
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { data: item } = await supabaseAdmin
       .from("news_items")
-      .select("id,url,source,tweet_text,image_url,region,category,viral_score")
+      .select("id,tweet_text,image_url,region")
       .eq("id", data.id)
       .maybeSingle();
     if (!item) return { ok: false, error: "Story not found" };
-    try {
-      const res = await fetch(webhookUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          id: item.id,
-          tweet_text: item.tweet_text,
-          image_url: item.image_url,
-          source_url: item.url,
-          source: item.source,
-          region: item.region,
-          category: item.category,
-          viral_score: item.viral_score,
-        }),
-        signal: AbortSignal.timeout(20000),
-      });
-      if (!res.ok) {
-        const body = await res.text().catch(() => "");
-        const msg = `Webhook ${res.status}: ${body.slice(0, 200)}`;
-        await supabaseAdmin.from("news_items").update({ post_error: msg }).eq("id", item.id);
-        return { ok: false, error: msg };
-      }
-      await supabaseAdmin
-        .from("news_items")
-        .update({ posted_at: new Date().toISOString(), post_error: null })
-        .eq("id", item.id);
-      return { ok: true };
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      await supabaseAdmin.from("news_items").update({ post_error: msg }).eq("id", item.id);
-      return { ok: false, error: msg };
+    const result = await postToBuffer(item);
+    if (!result.ok) {
+      await supabaseAdmin.from("news_items").update({ post_error: result.error }).eq("id", item.id);
+      return { ok: false, error: result.error };
     }
+    await supabaseAdmin
+      .from("news_items")
+      .update({ posted_at: new Date().toISOString(), post_error: null })
+      .eq("id", item.id);
+    return { ok: true };
   });
 
