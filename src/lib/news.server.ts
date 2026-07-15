@@ -19,6 +19,15 @@ const FEEDS: { region: "nigeria" | "africa" | "america"; source: string; url: st
   { region: "nigeria", source: "Sahara Reporters", url: "https://saharareporters.com/rss.xml" },
   { region: "nigeria", source: "TheCable", url: "https://www.thecable.ng/feed" },
   { region: "nigeria", source: "Daily Trust", url: "https://dailytrust.com/feed/" },
+  { region: "nigeria", source: "Guardian NG", url: "https://guardian.ng/feed/" },
+  { region: "nigeria", source: "Leadership", url: "https://leadership.ng/feed/" },
+  { region: "nigeria", source: "The Nation", url: "https://thenationonlineng.net/feed/" },
+  { region: "nigeria", source: "Nairametrics", url: "https://nairametrics.com/feed/" },
+  { region: "nigeria", source: "BusinessDay", url: "https://businessday.ng/feed/" },
+  { region: "nigeria", source: "Legit.ng", url: "https://www.legit.ng/rss/all.rss" },
+  { region: "nigeria", source: "Pulse.ng", url: "https://www.pulse.ng/rss" },
+  { region: "nigeria", source: "Ripples Nigeria", url: "https://www.ripplesnigeria.com/feed/" },
+  { region: "nigeria", source: "PM News", url: "https://pmnewsnigeria.com/feed/" },
   // Africa
   { region: "africa", source: "AllAfrica", url: "https://allafrica.com/tools/headlines/rdf/latest/headlines.rdf" },
   { region: "africa", source: "BBC Africa", url: "https://feeds.bbci.co.uk/news/world/africa/rss.xml" },
@@ -30,6 +39,77 @@ const FEEDS: { region: "nigeria" | "africa" | "america"; source: string; url: st
   { region: "america", source: "CBS", url: "https://www.cbsnews.com/latest/rss/main" },
   { region: "america", source: "ABC News", url: "https://abcnews.go.com/abcnews/topstories" },
 ];
+
+// Sources whose RSS media:thumbnail is a site logo, not the article image
+const LOGO_ONLY_SOURCES = new Set([
+  "Punch",
+  "Vanguard",
+  "Channels TV",
+  "Daily Trust",
+  "Guardian NG",
+  "Leadership",
+  "The Nation",
+  "PM News",
+  "Legit.ng",
+]);
+
+function looksLikeLogo(url: string | null): boolean {
+  if (!url) return false;
+  const u = url.toLowerCase();
+  return (
+    /\/logo[\-_.]/.test(u) ||
+    /logo\.(png|jpg|jpeg|svg|webp)/.test(u) ||
+    /\/wp-content\/uploads\/[^/]+\/logo/.test(u) ||
+    /site[\-_]?logo/.test(u) ||
+    /brand[\-_]?mark/.test(u)
+  );
+}
+
+async function fetchOgImage(articleUrl: string): Promise<string | null> {
+  try {
+    const res = await fetch(articleUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (compatible; NewsAggregator/1.0)",
+        Accept: "text/html,application/xhtml+xml",
+      },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) return null;
+    const html = (await res.text()).slice(0, 200_000);
+    // Try og:image first, then twitter:image
+    const patterns = [
+      /<meta[^>]+property=["']og:image(?::secure_url)?["'][^>]+content=["']([^"']+)["']/i,
+      /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image(?::secure_url)?["']/i,
+      /<meta[^>]+name=["']twitter:image(?::src)?["'][^>]+content=["']([^"']+)["']/i,
+      /<meta[^>]+content=["']([^"']+)["'][^>]+name=["']twitter:image(?::src)?["']/i,
+    ];
+    for (const re of patterns) {
+      const m = html.match(re);
+      if (m && m[1] && !looksLikeLogo(m[1])) return m[1];
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+async function enrichImages(items: FeedItem[]): Promise<FeedItem[]> {
+  const targets = items
+    .map((it, idx) => ({ it, idx }))
+    .filter(({ it }) => LOGO_ONLY_SOURCES.has(it.source) || looksLikeLogo(it.image_url) || !it.image_url);
+
+  const CONCURRENCY = 8;
+  let cursor = 0;
+  async function worker() {
+    while (cursor < targets.length) {
+      const { it, idx } = targets[cursor++];
+      const og = await fetchOgImage(it.url);
+      if (og) items[idx] = { ...it, image_url: og };
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, targets.length) }, worker));
+  return items;
+}
 
 const parser = new XMLParser({
   ignoreAttributes: false,
