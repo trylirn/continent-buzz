@@ -9,7 +9,7 @@ export const Route = createFileRoute("/api/public/backfill-images")({
         const url = new URL(request.url);
         const limit = Math.min(Number(url.searchParams.get("limit") ?? 100), 300);
         const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-        const { fetchOgImage, looksLikeLogo } = await import("@/lib/news.server.internal");
+        const { fetchOgImage, looksLikeLogo } = await import("@/lib/news.server");
 
         // Grab candidates: null image, or image_url that looks like a logo/placeholder.
         // We pull a wider pool then filter in JS so we don't OR too many LIKEs.
