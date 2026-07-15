@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { postToBuffer } from "@/lib/news.functions";
 
-const DAILY_CAP = 24;
+const DAILY_CAP = 30;
 
 export const Route = createFileRoute("/api/public/auto-post")({
   server: {
