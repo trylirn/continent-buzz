@@ -29,12 +29,27 @@ export const Route = createFileRoute("/api/public/auto-post")({
             continue;
           }
 
-          const { data: candidates } = await supabaseAdmin
+          // Anti-repeat: skip sources already posted in the last 2 hours
+          const recentSince = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+          const { data: recentPosts } = await supabaseAdmin
             .from("news_items")
-            .select("id,tweet_text,image_url,region,viral_score,published_at")
+            .select("source")
+            .eq("region", region)
+            .gte("posted_at", recentSince);
+          const recentSources = Array.from(
+            new Set((recentPosts ?? []).map((r) => r.source).filter(Boolean)),
+          );
+
+          let query = supabaseAdmin
+            .from("news_items")
+            .select("id,tweet_text,image_url,region,viral_score,published_at,source")
             .is("posted_at", null)
             .eq("region", region)
-            .gte("viral_score", minScore)
+            .gte("viral_score", minScore);
+          if (recentSources.length > 0) {
+            query = query.not("source", "in", `(${recentSources.map((s) => `"${s}"`).join(",")})`);
+          }
+          const { data: candidates } = await query
             .order("viral_score", { ascending: false })
             .order("published_at", { ascending: false })
             .limit(1);
