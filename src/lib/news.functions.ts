@@ -149,21 +149,11 @@ export async function postToBuffer(item: {
       }
     }
   `;
-  const input = {
-    channelId,
+  const input: Record<string, unknown> = {
     text: item.tweet_text,
-
-    schedulingType: "NOW",
-
-    media: item.image_url
-      ? {
-          photos: [
-            {
-              url: item.image_url,
-            },
-          ],
-        }
-      : undefined,
+    channelId,
+    schedulingType: "automatic",
+    mode: "shareNow",
   };
   if (item.image_url) {
     input.assets = [{ image: { url: item.image_url } }];
