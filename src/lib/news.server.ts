@@ -68,7 +68,7 @@ export function looksLikeLogo(url: string | null): boolean {
   );
 }
 
-async function fetchOgImage(articleUrl: string): Promise<string | null> {
+export async function fetchOgImage(articleUrl: string): Promise<string | null> {
   try {
     const res = await fetch(articleUrl, {
       headers: {
