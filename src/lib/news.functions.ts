@@ -45,7 +45,15 @@ export const refreshAllNews = createServerFn({ method: "POST" }).handler(async (
   let rejected = 0;
 
   for (const group of grouped) {
-    const fresh = group.items.filter((i) => !seen.has(i.url));
+    // Cap fresh items per source per cycle so no outlet dominates the pool
+    const perSource = new Map<string, number>();
+    const fresh = group.items.filter((i) => {
+      if (seen.has(i.url)) return false;
+      const n = perSource.get(i.source) ?? 0;
+      if (n >= 5) return false;
+      perSource.set(i.source, n + 1);
+      return true;
+    });
     if (fresh.length === 0) continue;
 
     // Batch of 10 for AI
@@ -144,7 +152,6 @@ export async function postToBuffer(item: {
   const input: Record<string, unknown> = {
     text: item.tweet_text,
     channelId,
-    schedulingType: "automatic",
     mode: "shareNow",
   };
   if (item.image_url) {
