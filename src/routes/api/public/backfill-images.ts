@@ -11,17 +11,26 @@ export const Route = createFileRoute("/api/public/backfill-images")({
         const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
         const { fetchOgImage, looksLikeLogo } = await import("@/lib/news.server");
 
-        // Grab candidates: null image, or image_url that looks like a logo/placeholder.
-        // We pull a wider pool then filter in JS so we don't OR too many LIKEs.
-        const { data: rows } = await supabaseAdmin
-          .from("news_items")
-          .select("id,url,image_url,source")
-          .order("created_at", { ascending: false })
-          .limit(limit * 3);
-
-        const targets = (rows ?? []).filter(
-          (r) => !r.image_url || looksLikeLogo(r.image_url),
-        ).slice(0, limit);
+        // Two-pass fetch: (1) rows whose image_url still contains 'logo';
+        // (2) fill remainder from null-image rows if room remains.
+        const [{ data: logoRows }, { data: nullRows }] = await Promise.all([
+          supabaseAdmin
+            .from("news_items")
+            .select("id,url,image_url,source")
+            .ilike("image_url", "%logo%")
+            .order("created_at", { ascending: false })
+            .limit(limit),
+          supabaseAdmin
+            .from("news_items")
+            .select("id,url,image_url,source")
+            .is("image_url", null)
+            .order("created_at", { ascending: false })
+            .limit(limit),
+        ]);
+        const merged = [...(logoRows ?? []), ...(nullRows ?? [])];
+        const targets = merged
+          .filter((r) => !r.image_url || looksLikeLogo(r.image_url))
+          .slice(0, limit);
 
         let updated = 0;
         let cleared = 0;
