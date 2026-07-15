@@ -234,6 +234,12 @@ export async function fetchAllFeeds(): Promise<{ region: "nigeria" | "africa" | 
   // Group by region
   const grouped: Record<string, FeedItem[]> = { nigeria: [], africa: [], america: [] };
   for (const r of results) grouped[r.region].push(...r.items);
+  // Replace logo-only RSS images with the real article og:image
+  await Promise.all(
+    (["nigeria", "africa", "america"] as const).map(async (region) => {
+      grouped[region] = await enrichImages(grouped[region]);
+    }),
+  );
   return (["nigeria", "africa", "america"] as const).map((region) => ({ region, items: grouped[region] }));
 }
 
