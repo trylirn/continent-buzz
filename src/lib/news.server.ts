@@ -53,7 +53,7 @@ const LOGO_ONLY_SOURCES = new Set([
   "Legit.ng",
 ]);
 
-function looksLikeLogo(url: string | null): boolean {
+export function looksLikeLogo(url: string | null): boolean {
   if (!url) return false;
   const u = url.toLowerCase();
   return (
