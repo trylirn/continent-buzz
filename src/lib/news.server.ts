@@ -53,19 +53,22 @@ const LOGO_ONLY_SOURCES = new Set([
   "Legit.ng",
 ]);
 
-function looksLikeLogo(url: string | null): boolean {
+export function looksLikeLogo(url: string | null): boolean {
   if (!url) return false;
   const u = url.toLowerCase();
   return (
-    /\/logo[\-_.]/.test(u) ||
-    /logo\.(png|jpg|jpeg|svg|webp)/.test(u) ||
-    /\/wp-content\/uploads\/[^/]+\/logo/.test(u) ||
+    /[\/\-_]logo[\-_.]/.test(u) ||
+    /logo[\-_.].*\.(png|jpg|jpeg|svg|webp)/.test(u) ||
+    /\-logo\-/.test(u) ||
+    /_logo_/.test(u) ||
     /site[\-_]?logo/.test(u) ||
-    /brand[\-_]?mark/.test(u)
+    /brand[\-_]?mark/.test(u) ||
+    /placeholder/.test(u) ||
+    /default[\-_]image/.test(u)
   );
 }
 
-async function fetchOgImage(articleUrl: string): Promise<string | null> {
+export async function fetchOgImage(articleUrl: string): Promise<string | null> {
   try {
     const res = await fetch(articleUrl, {
       headers: {

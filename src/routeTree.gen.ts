@@ -14,6 +14,7 @@ import { Route as AmericaRouteImport } from './routes/america'
 import { Route as AfricaRouteImport } from './routes/africa'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ApiPublicRefreshFeedsRouteImport } from './routes/api/public/refresh-feeds'
+import { Route as ApiPublicBackfillImagesRouteImport } from './routes/api/public/backfill-images'
 import { Route as ApiPublicAutoPostRouteImport } from './routes/api/public/auto-post'
 
 const NigeriaRoute = NigeriaRouteImport.update({
@@ -41,6 +42,11 @@ const ApiPublicRefreshFeedsRoute = ApiPublicRefreshFeedsRouteImport.update({
   path: '/api/public/refresh-feeds',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiPublicBackfillImagesRoute = ApiPublicBackfillImagesRouteImport.update({
+  id: '/api/public/backfill-images',
+  path: '/api/public/backfill-images',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiPublicAutoPostRoute = ApiPublicAutoPostRouteImport.update({
   id: '/api/public/auto-post',
   path: '/api/public/auto-post',
@@ -53,6 +59,7 @@ export interface FileRoutesByFullPath {
   '/america': typeof AmericaRoute
   '/nigeria': typeof NigeriaRoute
   '/api/public/auto-post': typeof ApiPublicAutoPostRoute
+  '/api/public/backfill-images': typeof ApiPublicBackfillImagesRoute
   '/api/public/refresh-feeds': typeof ApiPublicRefreshFeedsRoute
 }
 export interface FileRoutesByTo {
@@ -61,6 +68,7 @@ export interface FileRoutesByTo {
   '/america': typeof AmericaRoute
   '/nigeria': typeof NigeriaRoute
   '/api/public/auto-post': typeof ApiPublicAutoPostRoute
+  '/api/public/backfill-images': typeof ApiPublicBackfillImagesRoute
   '/api/public/refresh-feeds': typeof ApiPublicRefreshFeedsRoute
 }
 export interface FileRoutesById {
@@ -70,6 +78,7 @@ export interface FileRoutesById {
   '/america': typeof AmericaRoute
   '/nigeria': typeof NigeriaRoute
   '/api/public/auto-post': typeof ApiPublicAutoPostRoute
+  '/api/public/backfill-images': typeof ApiPublicBackfillImagesRoute
   '/api/public/refresh-feeds': typeof ApiPublicRefreshFeedsRoute
 }
 export interface FileRouteTypes {
@@ -80,6 +89,7 @@ export interface FileRouteTypes {
     | '/america'
     | '/nigeria'
     | '/api/public/auto-post'
+    | '/api/public/backfill-images'
     | '/api/public/refresh-feeds'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -88,6 +98,7 @@ export interface FileRouteTypes {
     | '/america'
     | '/nigeria'
     | '/api/public/auto-post'
+    | '/api/public/backfill-images'
     | '/api/public/refresh-feeds'
   id:
     | '__root__'
@@ -96,6 +107,7 @@ export interface FileRouteTypes {
     | '/america'
     | '/nigeria'
     | '/api/public/auto-post'
+    | '/api/public/backfill-images'
     | '/api/public/refresh-feeds'
   fileRoutesById: FileRoutesById
 }
@@ -105,6 +117,7 @@ export interface RootRouteChildren {
   AmericaRoute: typeof AmericaRoute
   NigeriaRoute: typeof NigeriaRoute
   ApiPublicAutoPostRoute: typeof ApiPublicAutoPostRoute
+  ApiPublicBackfillImagesRoute: typeof ApiPublicBackfillImagesRoute
   ApiPublicRefreshFeedsRoute: typeof ApiPublicRefreshFeedsRoute
 }
 
@@ -145,6 +158,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicRefreshFeedsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/backfill-images': {
+      id: '/api/public/backfill-images'
+      path: '/api/public/backfill-images'
+      fullPath: '/api/public/backfill-images'
+      preLoaderRoute: typeof ApiPublicBackfillImagesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/auto-post': {
       id: '/api/public/auto-post'
       path: '/api/public/auto-post'
@@ -161,8 +181,19 @@ const rootRouteChildren: RootRouteChildren = {
   AmericaRoute: AmericaRoute,
   NigeriaRoute: NigeriaRoute,
   ApiPublicAutoPostRoute: ApiPublicAutoPostRoute,
+  ApiPublicBackfillImagesRoute: ApiPublicBackfillImagesRoute,
   ApiPublicRefreshFeedsRoute: ApiPublicRefreshFeedsRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}
