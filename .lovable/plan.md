@@ -1,67 +1,49 @@
-## Answering your two questions first
 
-### 1. Is your Channel ID `LatestINigeria`?
+## 1. Fix why posts aren't reaching X (root cause)
 
-**No.** `LatestINigeria` is just the display name (nickname) of your X channel in Buffer. The real Channel ID is a long random string of letters and numbers, like `6712abc9f4e2d1a8b3c45678`.
+The cron has been running fine every 30 min and Buffer is accepting every call (48 successful `posted_at` rows today, zero errors). The posts are being **queued in Buffer, not sent** because our GraphQL `createPost` mutation combines conflicting flags:
 
-**How to find it:**
-1. Go to <https://publish.buffer.com/developers/api>
-2. Scroll to the **"Channels"** (or **"Profiles"**) section — it lists each connected account.
-3. Next to **LatestINigeria** you'll see an **ID** field. Copy that long string. That's what I need.
+- `mode: "shareNow"` → post immediately
+- `schedulingType: "automatic"` → drop into the next Buffer queue slot
 
-### 2. Do you need to do anything to hit 1–2 posts per hour?
+Buffer honors `schedulingType`, so posts wait for Buffer's daily schedule (which is why you saw one post 20h ago).
 
-**Yes — two small things**, and then it's fully automatic.
+**Fix in `src/lib/news.functions.ts` → `postToBuffer`:** remove `schedulingType` entirely. Send only `text`, `channelId`, `mode: "shareNow"`, and optional `assets`. That's Buffer's documented "post now" shape.
 
-**How Buffer posting works (important to understand):**
-- Buffer has two modes: **"Add to Queue"** (posts at your scheduled slots) or **"Share Now"** (posts immediately, ignoring the schedule).
-- The schedule in your screenshot only matters for **queued** posts.
+## 2. Full automation, cap 30/day
 
-**We'll use "Share Now" mode** — meaning our system posts *immediately* whenever it fires, and Buffer's schedule/slots become irrelevant. This gives us full control over timing from our side.
+- Change `DAILY_CAP` from 24 → **30** in `src/routes/api/public/auto-post.ts`.
+- Keep the pg_cron `auto-post-x` schedule at `*/30 * * * *`. The rolling 24h cap in the handler auto-throttles once 30 is reached.
+- Add an anti-repeat filter: skip candidates from any source already posted in the last 2 hours, so we don't stack two Punch posts back-to-back.
+- No user action needed.
 
-**What you do in Buffer:**
-- **Nothing.** You can leave the posting schedule as-is (or even delete all the slots) — it won't matter. We're bypassing it.
+## 3. More Nigerian sources
 
-**What I do in code:**
-- Change the auto-post cron to run **every 30 minutes** instead of every 15 (currently every 15). That gives up to **2 posts per hour = 48/day max**.
-- Since we still want a reasonable daily cap, I'll set it to **24 posts/day** (1 per hour average). If you'd rather have a hard cap of 20 like before, just say the word.
-- Each cron cycle: pick the top-viral unposted Nigeria story, send to Buffer with `now=true`, mark it posted. Skip cycle if there's no fresh story or we've hit today's cap.
+Add to `FEEDS` in `src/lib/news.server.ts`:
+- Guardian Nigeria — `https://guardian.ng/feed/`
+- Leadership — `https://leadership.ng/feed/`
+- The Nation — `https://thenationonlineng.net/feed/`
+- Nairametrics — `https://nairametrics.com/feed/`
+- BusinessDay — `https://businessday.ng/feed/`
+- Legit.ng — `https://www.legit.ng/rss/all.rss`
+- Pulse.ng — `https://www.pulse.ng/rss`
+- Ripples Nigeria — `https://www.ripplesnigeria.com/feed/`
+- PM News — `https://pmnewsnigeria.com/feed/`
 
----
+Any feed that 404s just returns `[]` — safe. Also cap **5 fresh items per source per refresh cycle** in `refreshAllNews` so no single outlet monopolizes the AI budget or the candidate pool.
 
-## Updated full plan
+## 4. Real story images (not the Punch logo)
 
-### Part A — You do in Buffer (2 min)
+Punch, Vanguard, Channels TV, Daily Trust and a few others put their site logo in `media:thumbnail` instead of the article image. Fix in `src/lib/news.server.ts`:
 
-1. Confirm **LatestINigeria** X channel is connected in Buffer ✅ (done, per screenshot).
-2. Go to <https://publish.buffer.com/developers/api>.
-3. **Create Access Token** → copy the token string.
-4. In the **Channels** section, copy the **ID** next to LatestINigeria.
-5. Say "go" — I'll open the secure form for you to paste both values.
+- Add `fetchOgImage(url)` helper: fetches the article HTML (5s timeout, ~200 KB cap), regex-extracts `<meta property="og:image">`, falling back to `twitter:image`.
+- After building each `FeedItem`, run enrichment (concurrency 8) for items where source is in a "logo-only-in-RSS" list OR the current `image_url` looks like a logo (matches `/logo`, `logo.png`, `logo.jpg`, brand-slug patterns).
+- Replace `image_url` with the og:image when found; fall back to the RSS value on failure.
 
-### Part B — I do in code
+## Files changed
 
-1. **Add two secrets** (via secure form): `BUFFER_ACCESS_TOKEN`, `BUFFER_CHANNEL_ID_NIGERIA`.
-2. **Rewrite `postToX`** in `src/lib/news.functions.ts` to call Buffer's API directly (`POST https://api.bufferapp.com/1/updates/create.json`) with the tweet text, image URL, and channel ID, `now=true`. Save Buffer's post ID on success; save error message on failure.
-3. **Rewrite `src/routes/api/public/auto-post.ts`** to:
-   - Count Nigeria posts in the last 24h. If `>= 24`, exit silently.
-   - Otherwise pick the top-viral unposted Nigeria story and send to Buffer.
-4. **Update the cron schedule** from every 15 min to every 30 min.
-5. **Retire `X_WEBHOOK_URL`** — code no longer reads it. You can delete the Make.com scenario anytime after this ships.
+- `src/lib/news.functions.ts` — remove `schedulingType` from `postToBuffer`; add per-source cap in `refreshAllNews`.
+- `src/lib/news.server.ts` — add feeds, add `fetchOgImage`, upgrade image extraction.
+- `src/routes/api/public/auto-post.ts` — `DAILY_CAP = 30`, add 2-hour same-source anti-repeat filter.
 
-### Part C — Test
-
-1. Click **"Post to X now"** on any Nigeria card.
-2. Within 5 seconds it should appear on your X account.
-3. The 30-minute cron takes it from there automatically.
-
----
-
-## Technical details (skip if you like)
-
-- Endpoint: `POST https://api.bufferapp.com/1/updates/create.json`, form-encoded: `text`, `profile_ids[]`, `media[photo]`, `now=true`. Auth: `Authorization: Bearer $BUFFER_ACCESS_TOKEN`.
-- Daily cap query: `select count(*) from news_items where region='nigeria' and posted_at > now() - interval '24 hours'`. Skip if `>= 24`.
-- Cron: update `cron.schedule` interval in the pg_cron job from `*/15 * * * *` to `*/30 * * * *`.
-- Files touched: `src/lib/news.functions.ts`, `src/routes/api/public/auto-post.ts`, one SQL update to reschedule the cron. No schema changes.
-
-Approve and I'll start with the secrets form.
+No schema, secret, or cron changes required.

@@ -144,7 +144,6 @@ export async function postToBuffer(item: {
   const input: Record<string, unknown> = {
     text: item.tweet_text,
     channelId,
-    schedulingType: "automatic",
     mode: "shareNow",
   };
   if (item.image_url) {
