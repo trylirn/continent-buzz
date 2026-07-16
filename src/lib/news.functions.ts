@@ -8,6 +8,83 @@ function publicClient() {
   });
 }
 
+function bufferChannelForRegion(region: string): string | undefined {
+  if (region === "nigeria") return process.env.BUFFER_CHANNEL_ID_NIGERIA;
+  if (region === "africa") return process.env.BUFFER_CHANNEL_ID_AFRICA;
+  if (region === "america") return process.env.BUFFER_CHANNEL_ID_AMERICA;
+  return undefined;
+}
+
+function normalizeBufferImageUrl(raw: string | null | undefined, baseUrl?: string | null): string | null {
+  if (!raw) return null;
+  const cleaned = raw
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .trim();
+  if (!cleaned || cleaned.startsWith("data:") || cleaned.startsWith("blob:")) return null;
+  try {
+    const resolved = cleaned.startsWith("//")
+      ? new URL(`https:${cleaned}`)
+      : new URL(cleaned, baseUrl ?? undefined);
+    if (resolved.protocol !== "http:" && resolved.protocol !== "https:") return null;
+    return resolved.toString();
+  } catch {
+    return null;
+  }
+}
+
+function looksLikePublisherImage(url: string | null, source?: string | null): boolean {
+  if (!url) return false;
+  const u = url.toLowerCase();
+  let path = u;
+  let file = u;
+  try {
+    const parsed = new URL(url);
+    path = decodeURIComponent(parsed.pathname).toLowerCase();
+    file = path.split("/").pop() ?? path;
+  } catch {
+    // Raw URL fallback.
+  }
+  const sourceSlug = (source ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const compactFile = file.replace(/[^a-z0-9]+/g, "");
+  return (
+    /(^|[\/\-_.])(logo|logotype|wordmark|brandmark|brand|favicon|icon|apple-touch-icon|android-chrome)([\/\-_.]|$)/.test(path) ||
+    /(site|header|footer|mobile)[\-_]?(logo|brand|icon)/.test(path) ||
+    /(placeholder|default[\-_]?(image|thumbnail|photo)|no[\-_]?image|blank|avatar|gravatar)/.test(path) ||
+    /punchlogo/.test(compactFile) ||
+    /\.(svg|ico)(\?|$)/.test(u) ||
+    (Boolean(sourceSlug) && compactFile.includes(sourceSlug) && /(logo|brand|icon|mark)/.test(compactFile))
+  );
+}
+
+async function validateBufferStoryImage(
+  rawUrl: string | null | undefined,
+  articleUrl?: string | null,
+  source?: string | null,
+): Promise<string | null> {
+  const imageUrl = normalizeBufferImageUrl(rawUrl, articleUrl);
+  if (!imageUrl || looksLikePublisherImage(imageUrl, source)) return null;
+  try {
+    const res = await fetch(imageUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (compatible; NewsAggregator/1.0)",
+        Accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+        Range: "bytes=0-8191",
+      },
+      signal: AbortSignal.timeout(7000),
+    });
+    if (!res.ok && res.status !== 206) return null;
+    const contentType = (res.headers.get("content-type") ?? "").toLowerCase();
+    if (!contentType.startsWith("image/") || contentType.includes("svg")) return null;
+    const length = Number(res.headers.get("content-length") ?? 0);
+    if (length > 0 && length < 3500) return null;
+    await res.body?.cancel().catch(() => undefined);
+    return imageUrl;
+  } catch {
+    return null;
+  }
+}
+
 export const getNews = createServerFn({ method: "GET" })
   .inputValidator((input: { region?: string; category?: string; limit?: number }) => ({
     region: input.region,
@@ -134,12 +211,21 @@ export async function postToBuffer(item: {
   tweet_text: string;
   image_url: string | null;
   region: string;
-}): Promise<{ ok: true } | { ok: false; error: string }> {
+  source?: string | null;
+  url?: string | null;
+}): Promise<
+  | { ok: true; postId: string; usedImage: boolean; retriedWithoutImage: boolean; imageRejected: boolean }
+  | { ok: false; error: string; imageRejected?: boolean }
+> {
   const token = process.env.BUFFER_ACCESS_TOKEN;
-  const channelId =
-    item.region === "nigeria" ? process.env.BUFFER_CHANNEL_ID_NIGERIA : undefined;
+  const channelId = bufferChannelForRegion(item.region);
   if (!token) return { ok: false, error: "BUFFER_ACCESS_TOKEN not configured" };
   if (!channelId) return { ok: false, error: `No Buffer channel for region ${item.region}` };
+
+  const usableImage = item.image_url
+    ? await validateBufferStoryImage(item.image_url, item.url, item.source)
+    : null;
+  const imageRejected = Boolean(item.image_url && !usableImage);
 
   const query = `
     mutation CreatePost($input: CreatePostInput!) {
@@ -149,43 +235,71 @@ export async function postToBuffer(item: {
       }
     }
   `;
-  const input: Record<string, unknown> = {
-    text: item.tweet_text,
-    channelId,
-    schedulingType: "automatic",
-    mode: "shareNow",
-  };
-  if (item.image_url) {
-    input.assets = [{ image: { url: item.image_url } }];
-  }
 
-  const res = await fetch("https://api.buffer.com", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ query, variables: { input } }),
-    signal: AbortSignal.timeout(20000),
-  });
-  const body = await res.text().catch(() => "");
-  if (!res.ok) return { ok: false, error: `Buffer ${res.status}: ${body.slice(0, 250)}` };
-
-  try {
-    const json = JSON.parse(body) as {
-      errors?: { message?: string }[];
-      data?: { createPost?: { post?: { id?: string }; message?: string } };
+  async function createPost(imageUrl: string | null) {
+    const input: Record<string, unknown> = {
+      text: item.tweet_text,
+      channelId,
+      mode: "shareNow",
     };
-    if (json.errors && json.errors.length > 0) {
-      return { ok: false, error: `Buffer: ${json.errors.map((e) => e.message).join("; ").slice(0, 250)}` };
+    if (imageUrl) input.assets = [{ image: { url: imageUrl } }];
+
+    const res = await fetch("https://api.buffer.com", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ query, variables: { input } }),
+      signal: AbortSignal.timeout(20000),
+    });
+    const body = await res.text().catch(() => "");
+    if (!res.ok) return { ok: false as const, error: `Buffer ${res.status}: ${body.slice(0, 250)}` };
+
+    try {
+      const json = JSON.parse(body) as {
+        errors?: { message?: string }[];
+        data?: { createPost?: { post?: { id?: string }; message?: string } };
+      };
+      if (json.errors && json.errors.length > 0) {
+        return { ok: false as const, error: `Buffer: ${json.errors.map((e) => e.message).join("; ").slice(0, 250)}` };
+      }
+      const result = json.data?.createPost;
+      if (result?.message) return { ok: false as const, error: `Buffer: ${result.message}` };
+      if (!result?.post?.id) return { ok: false as const, error: `Buffer: unexpected response ${body.slice(0, 200)}` };
+      return { ok: true as const, postId: result.post.id };
+    } catch {
+      return { ok: false as const, error: `Buffer: invalid JSON ${body.slice(0, 200)}` };
     }
-    const result = json.data?.createPost;
-    if (result?.message) return { ok: false, error: `Buffer: ${result.message}` };
-    if (!result?.post?.id) return { ok: false, error: `Buffer: unexpected response ${body.slice(0, 200)}` };
-  } catch {
-    return { ok: false, error: `Buffer: invalid JSON ${body.slice(0, 200)}` };
   }
-  return { ok: true };
+
+  const first = await createPost(usableImage);
+  if (first.ok) {
+    return {
+      ok: true,
+      postId: first.postId,
+      usedImage: Boolean(usableImage),
+      retriedWithoutImage: false,
+      imageRejected,
+    };
+  }
+
+  const imageError = /image|asset|media|url is not accessible/i.test(first.error);
+  if (usableImage && imageError) {
+    const retry = await createPost(null);
+    if (retry.ok) {
+      return {
+        ok: true,
+        postId: retry.postId,
+        usedImage: false,
+        retriedWithoutImage: true,
+        imageRejected: true,
+      };
+    }
+    return { ok: false, error: `${first.error}; retry without image failed: ${retry.error}`, imageRejected: true };
+  }
+
+  return { ok: false, error: first.error, imageRejected };
 }
 
 export const postToX = createServerFn({ method: "POST" })
@@ -194,7 +308,7 @@ export const postToX = createServerFn({ method: "POST" })
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { data: item } = await supabaseAdmin
       .from("news_items")
-      .select("id,tweet_text,image_url,region")
+      .select("id,tweet_text,image_url,region,source,url")
       .eq("id", data.id)
       .maybeSingle();
     if (!item) return { ok: false, error: "Story not found" };
@@ -205,7 +319,11 @@ export const postToX = createServerFn({ method: "POST" })
     }
     await supabaseAdmin
       .from("news_items")
-      .update({ posted_at: new Date().toISOString(), post_error: null })
+      .update({
+        posted_at: new Date().toISOString(),
+        post_error: null,
+        ...(result.imageRejected ? { image_url: null } : {}),
+      })
       .eq("id", item.id);
     return { ok: true };
   });

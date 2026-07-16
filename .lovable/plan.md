@@ -1,49 +1,65 @@
+## Confirmed direction
 
-## 1. Fix why posts aren't reaching X (root cause)
+You’re right: **real story images means the actual image attached to the article/story**, such as article `og:image`, `twitter:image`, or in-article media. It does **not** mean the publisher/source logo. Logos should be rejected and cleared if no article image is found.
 
-The cron has been running fine every 30 min and Buffer is accepting every call (48 successful `posted_at` rows today, zero errors). The posts are being **queued in Buffer, not sent** because our GraphQL `createPost` mutation combines conflicting flags:
+## Implementation plan
 
-- `mode: "shareNow"` → post immediately
-- `schedulingType: "automatic"` → drop into the next Buffer queue slot
+1. **Permanently fix story images**
+  - Rework image extraction to prioritize:
+  1. article `og:image:secure_url`
+  2. article `og:image`
+  3. article `twitter:image`
+  4. article body image candidates
+  5. RSS image only if it is clearly not a logo/default publisher image
+    d stronger logo/source-image rejection for Punch and other outlets:
+    reject URLs containing logo/brand/placeholder/default publisher assets
+    reject known source-logo patterns even when the URL does not literally say `logo`
+    normalize encoded URLs like `&amp;`
+    resolve relative image URLs against the article URL
+    lidate candidate images before saving or posting:
+    must return an image content type
+    must be publicly reachable
+    must not be an obvious tiny/static publisher asset
+     no real article image is found, store `null` so the UI shows no image instead of showing a source logo.
+    ply this both to new refreshes and existing database rows with a backfill run.
+2. **Protect manual “Post to X now” while fixing automation**
+  - Keep the currently working manual button behavior.
+  - Move the Buffer posting logic into a shared safe helper used by both manual and scheduled posting.
+  - Only mark a story as posted when Buffer returns a clear successful post result.
+  - If Buffer rejects an image URL, retry that same story without the image before failing it, so bad images do not stop automation.
+  - Save clear per-story errors when Buffer still rejects a post.
+3. **Make auto-posting actually run by itself**
+  - Keep the cron schedule, but make the endpoint fast and reliable.
+  - Process a small number of stories per run rather than doing long work in one request.
+  - Keep the maximum at **30 posts per day**.
+  - Avoid repeating the same source too close together.
+  - Update the scheduled job call so it uses the stable backend endpoint correctly and does not falsely timeout after 5 seconds.
+  - Make the auto-post response show exactly what happened: posted, skipped due to cap, skipped due to missing channel, failed with Buffer error, or retried without image.
+4. **Add the same X posting features for Africa Pulse**
+  - Show **Post to X now** on Africa and America story cards too.
+  - Extend auto-posting to Nigeria, Africa independently.
+  - Use separate Buffer channel IDs by region:
+    - Nigeria: existing saved channel
+    - Africa: `BUFFER_CHANNEL_ID_AFRICA`
+  - If Africa channel IDs are not saved yet, Nigeria keeps working and those regions are skipped with a clear message.
+5. **What I need from your end**
+  - I can implement the code and backend job fixes.
+  - You only need to provide the **Africa Buffer channel ID** if they should post to different Buffer channels/accounts.
+  - I will request those through secure secret fields after implementation if they are missing; don’t paste them in chat.
 
-Buffer honors `schedulingType`, so posts wait for Buffer's daily schedule (which is why you saw one post 20h ago).
+## Files to update
 
-**Fix in `src/lib/news.functions.ts` → `postToBuffer`:** remove `schedulingType` entirely. Send only `text`, `channelId`, `mode: "shareNow"`, and optional `assets`. That's Buffer's documented "post now" shape.
+- `src/lib/news.server.ts`
+- `src/lib/news.functions.ts`
+- `src/routes/api/public/auto-post.ts`
+- `src/routes/api/public/refresh-feeds.ts`
+- `src/routes/api/public/backfill-images.ts`
+- `src/components/NewsCard.tsx`
+- backend scheduled job configuration
 
-## 2. Full automation, cap 30/day
+## Safety rules
 
-- Change `DAILY_CAP` from 24 → **30** in `src/routes/api/public/auto-post.ts`.
-- Keep the pg_cron `auto-post-x` schedule at `*/30 * * * *`. The rolling 24h cap in the handler auto-throttles once 30 is reached.
-- Add an anti-repeat filter: skip candidates from any source already posted in the last 2 hours, so we don't stack two Punch posts back-to-back.
-- No user action needed.
-
-## 3. More Nigerian sources
-
-Add to `FEEDS` in `src/lib/news.server.ts`:
-- Guardian Nigeria — `https://guardian.ng/feed/`
-- Leadership — `https://leadership.ng/feed/`
-- The Nation — `https://thenationonlineng.net/feed/`
-- Nairametrics — `https://nairametrics.com/feed/`
-- BusinessDay — `https://businessday.ng/feed/`
-- Legit.ng — `https://www.legit.ng/rss/all.rss`
-- Pulse.ng — `https://www.pulse.ng/rss`
-- Ripples Nigeria — `https://www.ripplesnigeria.com/feed/`
-- PM News — `https://pmnewsnigeria.com/feed/`
-
-Any feed that 404s just returns `[]` — safe. Also cap **5 fresh items per source per refresh cycle** in `refreshAllNews` so no single outlet monopolizes the AI budget or the candidate pool.
-
-## 4. Real story images (not the Punch logo)
-
-Punch, Vanguard, Channels TV, Daily Trust and a few others put their site logo in `media:thumbnail` instead of the article image. Fix in `src/lib/news.server.ts`:
-
-- Add `fetchOgImage(url)` helper: fetches the article HTML (5s timeout, ~200 KB cap), regex-extracts `<meta property="og:image">`, falling back to `twitter:image`.
-- After building each `FeedItem`, run enrichment (concurrency 8) for items where source is in a "logo-only-in-RSS" list OR the current `image_url` looks like a logo (matches `/logo`, `logo.png`, `logo.jpg`, brand-slug patterns).
-- Replace `image_url` with the og:image when found; fall back to the RSS value on failure.
-
-## Files changed
-
-- `src/lib/news.functions.ts` — remove `schedulingType` from `postToBuffer`; add per-source cap in `refreshAllNews`.
-- `src/lib/news.server.ts` — add feeds, add `fetchOgImage`, upgrade image extraction.
-- `src/routes/api/public/auto-post.ts` — `DAILY_CAP = 30`, add 2-hour same-source anti-repeat filter.
-
-No schema, secret, or cron changes required.
+- Do not remove or break the working manual Nigeria post button.
+- Do not reset or delete existing stories.
+- Do not show source logos as story images.
+- Do not let missing Africa/America channels break Nigeria automation.
