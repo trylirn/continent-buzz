@@ -169,20 +169,16 @@ export function NewsCard({ item }: { item: NewsItem }) {
           )}
         </div>
 
-        {item.region === "nigeria" && (
-          <>
-            <button
-              onClick={handlePostToX}
-              disabled={posting || posted}
-              className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-md bg-sky-500 px-3 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <Send className="h-3.5 w-3.5" />
-              {posted ? "Posted to X" : posting ? "Sending…" : "Post to X now"}
-            </button>
-            {item.post_error && !posted && (
-              <p className="mt-1 text-xs text-red-600">Last error: {item.post_error}</p>
-            )}
-          </>
+        <button
+          onClick={handlePostToX}
+          disabled={posting || posted}
+          className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-md bg-sky-500 px-3 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          <Send className="h-3.5 w-3.5" />
+          {posted ? "Posted to X" : posting ? "Sending…" : "Post to X now"}
+        </button>
+        {item.post_error && !posted && (
+          <p className="mt-1 text-xs text-red-600">Last error: {item.post_error}</p>
         )}
 
 
