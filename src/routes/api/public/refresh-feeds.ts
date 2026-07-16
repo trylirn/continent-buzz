@@ -14,7 +14,14 @@ export const Route = createFileRoute("/api/public/refresh-feeds")({
 
         let inserted = 0;
         for (const group of grouped) {
-          const fresh = group.items.filter((i) => !seen.has(i.url));
+          const perSource = new Map<string, number>();
+          const fresh = group.items.filter((i) => {
+            if (seen.has(i.url)) return false;
+            const n = perSource.get(i.source) ?? 0;
+            if (n >= 5) return false;
+            perSource.set(i.source, n + 1);
+            return true;
+          });
           for (let i = 0; i < fresh.length; i += 10) {
             const batch = fresh.slice(i, i + 10);
             try {
