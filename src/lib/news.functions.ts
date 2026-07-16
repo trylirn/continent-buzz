@@ -8,6 +8,13 @@ function publicClient() {
   });
 }
 
+function bufferChannelForRegion(region: string): string | undefined {
+  if (region === "nigeria") return process.env.BUFFER_CHANNEL_ID_NIGERIA;
+  if (region === "africa") return process.env.BUFFER_CHANNEL_ID_AFRICA;
+  if (region === "america") return process.env.BUFFER_CHANNEL_ID_AMERICA;
+  return undefined;
+}
+
 function normalizeBufferImageUrl(raw: string | null | undefined, baseUrl?: string | null): string | null {
   if (!raw) return null;
   const cleaned = raw
@@ -211,11 +218,7 @@ export async function postToBuffer(item: {
   | { ok: false; error: string; imageRejected?: boolean }
 > {
   const token = process.env.BUFFER_ACCESS_TOKEN;
-  const channelId = {
-    nigeria: process.env.BUFFER_CHANNEL_ID_NIGERIA,
-    africa: process.env.BUFFER_CHANNEL_ID_AFRICA,
-    america: process.env.BUFFER_CHANNEL_ID_AMERICA,
-  }[item.region];
+  const channelId = bufferChannelForRegion(item.region);
   if (!token) return { ok: false, error: "BUFFER_ACCESS_TOKEN not configured" };
   if (!channelId) return { ok: false, error: `No Buffer channel for region ${item.region}` };
 
