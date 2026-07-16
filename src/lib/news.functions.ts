@@ -8,6 +8,76 @@ function publicClient() {
   });
 }
 
+function normalizeBufferImageUrl(raw: string | null | undefined, baseUrl?: string | null): string | null {
+  if (!raw) return null;
+  const cleaned = raw
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .trim();
+  if (!cleaned || cleaned.startsWith("data:") || cleaned.startsWith("blob:")) return null;
+  try {
+    const resolved = cleaned.startsWith("//")
+      ? new URL(`https:${cleaned}`)
+      : new URL(cleaned, baseUrl ?? undefined);
+    if (resolved.protocol !== "http:" && resolved.protocol !== "https:") return null;
+    return resolved.toString();
+  } catch {
+    return null;
+  }
+}
+
+function looksLikePublisherImage(url: string | null, source?: string | null): boolean {
+  if (!url) return false;
+  const u = url.toLowerCase();
+  let path = u;
+  let file = u;
+  try {
+    const parsed = new URL(url);
+    path = decodeURIComponent(parsed.pathname).toLowerCase();
+    file = path.split("/").pop() ?? path;
+  } catch {
+    // Raw URL fallback.
+  }
+  const sourceSlug = (source ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const compactFile = file.replace(/[^a-z0-9]+/g, "");
+  return (
+    /(^|[\/\-_.])(logo|logotype|wordmark|brandmark|brand|favicon|icon|apple-touch-icon|android-chrome)([\/\-_.]|$)/.test(path) ||
+    /(site|header|footer|mobile)[\-_]?(logo|brand|icon)/.test(path) ||
+    /(placeholder|default[\-_]?(image|thumbnail|photo)|no[\-_]?image|blank|avatar|gravatar)/.test(path) ||
+    /punchlogo/.test(compactFile) ||
+    /\.(svg|ico)(\?|$)/.test(u) ||
+    (Boolean(sourceSlug) && compactFile.includes(sourceSlug) && /(logo|brand|icon|mark)/.test(compactFile))
+  );
+}
+
+async function validateBufferStoryImage(
+  rawUrl: string | null | undefined,
+  articleUrl?: string | null,
+  source?: string | null,
+): Promise<string | null> {
+  const imageUrl = normalizeBufferImageUrl(rawUrl, articleUrl);
+  if (!imageUrl || looksLikePublisherImage(imageUrl, source)) return null;
+  try {
+    const res = await fetch(imageUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (compatible; NewsAggregator/1.0)",
+        Accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+        Range: "bytes=0-8191",
+      },
+      signal: AbortSignal.timeout(7000),
+    });
+    if (!res.ok && res.status !== 206) return null;
+    const contentType = (res.headers.get("content-type") ?? "").toLowerCase();
+    if (!contentType.startsWith("image/") || contentType.includes("svg")) return null;
+    const length = Number(res.headers.get("content-length") ?? 0);
+    if (length > 0 && length < 3500) return null;
+    await res.body?.cancel().catch(() => undefined);
+    return imageUrl;
+  } catch {
+    return null;
+  }
+}
+
 export const getNews = createServerFn({ method: "GET" })
   .inputValidator((input: { region?: string; category?: string; limit?: number }) => ({
     region: input.region,
@@ -149,9 +219,8 @@ export async function postToBuffer(item: {
   if (!token) return { ok: false, error: "BUFFER_ACCESS_TOKEN not configured" };
   if (!channelId) return { ok: false, error: `No Buffer channel for region ${item.region}` };
 
-  const { isUsableStoryImage } = await import("./news.server");
   const usableImage = item.image_url
-    ? await isUsableStoryImage(item.image_url, item.url ?? undefined, item.source)
+    ? await validateBufferStoryImage(item.image_url, item.url, item.source)
     : null;
   const imageRejected = Boolean(item.image_url && !usableImage);
 
