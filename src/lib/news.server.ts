@@ -40,7 +40,7 @@ const FEEDS: { region: "nigeria" | "africa" | "america"; source: string; url: st
   { region: "america", source: "ABC News", url: "https://abcnews.go.com/abcnews/topstories" },
 ];
 
-// Sources whose RSS media:thumbnail is a site logo, not the article image
+// Sources whose RSS media:thumbnail is often a site logo, not the article image.
 const LOGO_ONLY_SOURCES = new Set([
   "Punch",
   "Vanguard",
@@ -53,42 +53,146 @@ const LOGO_ONLY_SOURCES = new Set([
   "Legit.ng",
 ]);
 
-export function looksLikeLogo(url: string | null): boolean {
+export function normalizeImageUrl(raw: string | null | undefined, baseUrl?: string): string | null {
+  if (!raw) return null;
+  const cleaned = decodeEntities(String(raw))
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .trim();
+  if (!cleaned || cleaned.startsWith("data:") || cleaned.startsWith("blob:")) return null;
+  try {
+    const resolved = cleaned.startsWith("//")
+      ? new URL(`https:${cleaned}`)
+      : new URL(cleaned, baseUrl);
+    if (resolved.protocol !== "http:" && resolved.protocol !== "https:") return null;
+    return resolved.toString();
+  } catch {
+    return null;
+  }
+}
+
+export function looksLikeLogo(url: string | null, source?: string | null): boolean {
   if (!url) return false;
-  const u = url.toLowerCase();
+  const normalized = normalizeImageUrl(url) ?? url;
+  const u = normalized.toLowerCase();
+  let path = u;
+  let file = u;
+  try {
+    const parsed = new URL(normalized);
+    path = decodeURIComponent(parsed.pathname).toLowerCase();
+    file = path.split("/").pop() ?? path;
+  } catch {
+    // Keep the lowercased raw URL as fallback.
+  }
+  const sourceSlug = (source ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const compactFile = file.replace(/[^a-z0-9]+/g, "");
   return (
-    /[\/\-_]logo[\-_.]/.test(u) ||
-    /logo[\-_.].*\.(png|jpg|jpeg|svg|webp)/.test(u) ||
-    /\-logo\-/.test(u) ||
-    /_logo_/.test(u) ||
-    /site[\-_]?logo/.test(u) ||
-    /brand[\-_]?mark/.test(u) ||
-    /placeholder/.test(u) ||
-    /default[\-_]image/.test(u)
+    /(^|[\/\-_.])(logo|logotype|wordmark|brandmark|brand|favicon|icon|apple-touch-icon|android-chrome)([\/\-_.]|$)/.test(path) ||
+    /(site|header|footer|mobile)[\-_]?(logo|brand|icon)/.test(path) ||
+    /(placeholder|default[\-_]?(image|thumbnail|photo)|no[\-_]?image|blank|avatar|gravatar)/.test(path) ||
+    /punchlogo/.test(compactFile) ||
+    /channelstvlogo/.test(compactFile) ||
+    /vanguardlogo/.test(compactFile) ||
+    /guardianlogo/.test(compactFile) ||
+    /leadershiplogo/.test(compactFile) ||
+    (Boolean(sourceSlug) && compactFile.includes(sourceSlug) && /(logo|brand|icon|mark)/.test(compactFile)) ||
+    /\.(svg|ico)(\?|$)/.test(u)
   );
 }
 
-export async function fetchOgImage(articleUrl: string): Promise<string | null> {
+function getHtmlAttr(tag: string, attr: string): string | null {
+  const re = new RegExp(`${attr}\\s*=\\s*(["'])(.*?)\\1`, "i");
+  return tag.match(re)?.[2] ?? null;
+}
+
+function collectArticleImageCandidates(html: string, articleUrl: string): string[] {
+  const candidates: string[] = [];
+  const add = (value: string | null | undefined) => {
+    const normalized = normalizeImageUrl(value, articleUrl);
+    if (normalized && !candidates.includes(normalized)) candidates.push(normalized);
+  };
+
+  const metaTags = html.match(/<meta\b[^>]*>/gi) ?? [];
+  const wanted = new Set([
+    "og:image:secure_url",
+    "og:image:url",
+    "og:image",
+    "twitter:image:src",
+    "twitter:image",
+  ]);
+  for (const tag of metaTags) {
+    const key = (getHtmlAttr(tag, "property") ?? getHtmlAttr(tag, "name") ?? "").toLowerCase();
+    if (wanted.has(key)) add(getHtmlAttr(tag, "content"));
+  }
+
+  const linkTags = html.match(/<link\b[^>]*>/gi) ?? [];
+  for (const tag of linkTags) {
+    const rel = (getHtmlAttr(tag, "rel") ?? "").toLowerCase();
+    if (rel.includes("image_src")) add(getHtmlAttr(tag, "href"));
+  }
+
+  const imgTags = html.match(/<img\b[^>]*>/gi) ?? [];
+  for (const tag of imgTags.slice(0, 80)) {
+    const className = `${getHtmlAttr(tag, "class") ?? ""} ${getHtmlAttr(tag, "id") ?? ""}`.toLowerCase();
+    if (/(logo|avatar|icon|author|profile|ad-|advert|tracking|pixel|spinner)/.test(className)) continue;
+    add(
+      getHtmlAttr(tag, "data-src") ??
+        getHtmlAttr(tag, "data-lazy-src") ??
+        getHtmlAttr(tag, "data-original") ??
+        getHtmlAttr(tag, "src"),
+    );
+  }
+
+  return candidates;
+}
+
+export async function isUsableStoryImage(
+  rawUrl: string | null | undefined,
+  articleUrl?: string,
+  source?: string | null,
+): Promise<string | null> {
+  const imageUrl = normalizeImageUrl(rawUrl, articleUrl);
+  if (!imageUrl || looksLikeLogo(imageUrl, source)) return null;
+  try {
+    const res = await fetch(imageUrl, {
+      method: "GET",
+      headers: {
+        "User-Agent": "Mozilla/5.0 (compatible; NewsAggregator/1.0)",
+        Accept: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+        Range: "bytes=0-8191",
+      },
+      signal: AbortSignal.timeout(7000),
+    });
+    if (!res.ok && res.status !== 206) return null;
+    const contentType = (res.headers.get("content-type") ?? "").toLowerCase();
+    if (!contentType.startsWith("image/") || contentType.includes("svg")) return null;
+    const length = Number(res.headers.get("content-length") ?? 0);
+    if (length > 0 && length < 3500) return null;
+    await res.body?.cancel().catch(() => undefined);
+    return imageUrl;
+  } catch {
+    return null;
+  }
+}
+
+export function shouldRefetchArticleImage(source: string | null, imageUrl: string | null): boolean {
+  return !imageUrl || looksLikeLogo(imageUrl, source) || LOGO_ONLY_SOURCES.has(source ?? "");
+}
+
+export async function fetchOgImage(articleUrl: string, source?: string | null): Promise<string | null> {
   try {
     const res = await fetch(articleUrl, {
       headers: {
         "User-Agent": "Mozilla/5.0 (compatible; NewsAggregator/1.0)",
         Accept: "text/html,application/xhtml+xml",
       },
-      signal: AbortSignal.timeout(5000),
+      signal: AbortSignal.timeout(8000),
     });
     if (!res.ok) return null;
     const html = (await res.text()).slice(0, 200_000);
-    // Try og:image first, then twitter:image
-    const patterns = [
-      /<meta[^>]+property=["']og:image(?::secure_url)?["'][^>]+content=["']([^"']+)["']/i,
-      /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image(?::secure_url)?["']/i,
-      /<meta[^>]+name=["']twitter:image(?::src)?["'][^>]+content=["']([^"']+)["']/i,
-      /<meta[^>]+content=["']([^"']+)["'][^>]+name=["']twitter:image(?::src)?["']/i,
-    ];
-    for (const re of patterns) {
-      const m = html.match(re);
-      if (m && m[1] && !looksLikeLogo(m[1])) return m[1];
+    for (const candidate of collectArticleImageCandidates(html, articleUrl)) {
+      const usable = await isUsableStoryImage(candidate, articleUrl, source);
+      if (usable) return usable;
     }
     return null;
   } catch {
@@ -99,15 +203,20 @@ export async function fetchOgImage(articleUrl: string): Promise<string | null> {
 async function enrichImages(items: FeedItem[]): Promise<FeedItem[]> {
   const targets = items
     .map((it, idx) => ({ it, idx }))
-    .filter(({ it }) => LOGO_ONLY_SOURCES.has(it.source) || looksLikeLogo(it.image_url) || !it.image_url);
+    .filter(({ it }) => shouldRefetchArticleImage(it.source, it.image_url));
 
   const CONCURRENCY = 8;
   let cursor = 0;
   async function worker() {
     while (cursor < targets.length) {
       const { it, idx } = targets[cursor++];
-      const og = await fetchOgImage(it.url);
-      if (og) items[idx] = { ...it, image_url: og };
+      const og = await fetchOgImage(it.url, it.source);
+      if (og) {
+        items[idx] = { ...it, image_url: og };
+        continue;
+      }
+      const usableOriginal = await isUsableStoryImage(it.image_url, it.url, it.source);
+      items[idx] = { ...it, image_url: usableOriginal };
     }
   }
   await Promise.all(Array.from({ length: Math.min(CONCURRENCY, targets.length) }, worker));
@@ -120,23 +229,32 @@ const parser = new XMLParser({
   textNodeName: "#text",
 });
 
-function extractImage(item: Record<string, unknown>): string | null {
+function extractImage(item: Record<string, unknown>, articleUrl: string, source: string): string | null {
   const g = (k: string) => item[k] as unknown;
   const media = g("media:content") ?? g("media:thumbnail");
   if (media) {
     const arr = Array.isArray(media) ? media : [media];
     for (const m of arr) {
       const url = (m as Record<string, unknown>)["@_url"];
-      if (typeof url === "string") return url;
+      if (typeof url === "string") {
+        const normalized = normalizeImageUrl(url, articleUrl);
+        if (normalized && !looksLikeLogo(normalized, source)) return normalized;
+      }
     }
   }
   const enclosure = g("enclosure") as Record<string, unknown> | undefined;
-  if (enclosure && typeof enclosure["@_url"] === "string") return enclosure["@_url"] as string;
+  if (enclosure && typeof enclosure["@_url"] === "string") {
+    const normalized = normalizeImageUrl(enclosure["@_url"] as string, articleUrl);
+    if (normalized && !looksLikeLogo(normalized, source)) return normalized;
+  }
   // Try to extract from description/content
   const content = (g("content:encoded") ?? g("description") ?? "") as string;
   if (typeof content === "string") {
     const m = content.match(/<img[^>]+src=["']([^"']+)["']/i);
-    if (m) return m[1];
+    if (m) {
+      const normalized = normalizeImageUrl(m[1], articleUrl);
+      if (normalized && !looksLikeLogo(normalized, source)) return normalized;
+    }
   }
   return null;
 }
@@ -220,7 +338,7 @@ async function fetchFeed(feed: (typeof FEEDS)[number]): Promise<FeedItem[]> {
         source: feed.source,
         title,
         description: description.slice(0, 500),
-        image_url: extractImage(item),
+        image_url: extractImage(item, url, feed.source),
         published_at,
       };
     }).filter((i) => i.url && i.title);
