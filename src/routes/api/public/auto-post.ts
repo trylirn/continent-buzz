@@ -70,8 +70,8 @@ export const Route = createFileRoute("/api/public/auto-post")({
             query = query.not("source", "in", `(${recentSources.map((s) => `"${s}"`).join(",")})`);
           }
           const { data: candidates } = await query
-            .order("viral_score", { ascending: false })
             .order("published_at", { ascending: false })
+            .order("viral_score", { ascending: false })
             .limit(Math.max(limit * 3, 3));
 
           const items = (candidates ?? []).slice(0, limit);
