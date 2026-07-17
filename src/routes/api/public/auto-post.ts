@@ -3,7 +3,7 @@ import { postToBuffer } from "@/lib/news.functions";
 
 const DAILY_CAP = 1000;
 const REGIONS = ["nigeria", "africa", "america"] as const;
-const POSTS_PER_REGION_PER_RUN = 5;
+const POSTS_PER_REGION_PER_RUN = 2;
 
 export const Route = createFileRoute("/api/public/auto-post")({
   server: {
