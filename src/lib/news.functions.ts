@@ -237,14 +237,20 @@ export async function postToBuffer(item: {
   `;
 
   async function createPost(imageUrl: string | null) {
+    const assets = imageUrl ? [{ image: { url: imageUrl } }] : undefined;
+    const rootPost: Record<string, unknown> = { text: item.tweet_text };
+    if (assets) rootPost.assets = assets;
+    const thread: Record<string, unknown>[] = [rootPost];
+    if (item.url) thread.push({ text: `Source: ${item.url}` });
+
     const input: Record<string, unknown> = {
       text: item.tweet_text,
       channelId,
       schedulingType: "automatic",
       mode: "shareNow",
+      ...(thread.length > 1 ? { metadata: { twitter: { thread } } } : {}),
     };
-    if (imageUrl) input.assets = [{ image: { url: imageUrl } }];
-
+    if (assets) input.assets = assets;
     const res = await fetch("https://api.buffer.com", {
       method: "POST",
       headers: {
