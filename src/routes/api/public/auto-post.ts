@@ -67,7 +67,8 @@ export const Route = createFileRoute("/api/public/auto-post")({
             .select("id,tweet_text,image_url,region,viral_score,published_at,source,url")
             .is("posted_at", null)
             .eq("region", region)
-            .gte("viral_score", minScore);
+            .gte("viral_score", minScore)
+            .gte("published_at", freshSince);
           if (recentSources.length > 0) {
             query = query.not("source", "in", `(${recentSources.map((s) => `"${s}"`).join(",")})`);
           }
