@@ -451,7 +451,7 @@ ${JSON.stringify(items, null, 2)}`;
   const fb = fallbackCurate(items);
   return items.map((_, i): AIResult => {
     const o = (arr[i] ?? {}) as Record<string, unknown>;
-    const tweet = cleanTweet(String(o.tweet_text ?? "")).slice(0, 275);
+    const tweet = cleanTweet(String(o.tweet_text ?? "")).slice(0, 279);
     if (!tweet) return fb[i];
     return {
       region: (o.region as AIResult["region"]) ?? fb[i].region,
