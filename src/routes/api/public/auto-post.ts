@@ -11,8 +11,9 @@ export const Route = createFileRoute("/api/public/auto-post")({
     handlers: {
       POST: async () => {
         const minScore = Number(process.env.X_MIN_VIRAL_SCORE ?? 55);
+        const freshSince = new Date(Date.now() - MAX_ARTICLE_AGE_MS).toISOString();
         const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-
+        
         let posted = 0;
         const postedItems: {
           id: string;
